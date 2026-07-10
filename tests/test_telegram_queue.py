@@ -9,6 +9,7 @@ from takopi.telegram.api_models import (
     File,
     ForumTopic,
     Message,
+    Sticker,
     Update,
     User,
 )
@@ -31,6 +32,7 @@ class FakeBot(BotClient):
         self.chat_calls: list[int] = []
         self.chat_member_calls: list[tuple[int, int]] = []
         self.create_topic_calls: list[tuple[int, str]] = []
+        self.topic_icon_calls = 0
         self._edit_attempts = 0
         self._updates_attempts = 0
         self.retry_after: float | None = None
@@ -184,10 +186,32 @@ class FakeBot(BotClient):
         self.chat_member_calls.append((chat_id, user_id))
         return ChatMember(status="member")
 
+    async def get_forum_topic_icon_stickers(self) -> list[Sticker] | None:
+        self.topic_icon_calls += 1
+        return [
+            Sticker(
+                file_id="sticker-1",
+                emoji="🔎",
+                custom_emoji_id="icon-1",
+                is_animated=True,
+            )
+        ]
+
     async def create_forum_topic(self, chat_id: int, name: str) -> ForumTopic | None:
         self.calls.append("create_forum_topic")
         self.create_topic_calls.append((chat_id, name))
         return ForumTopic(message_thread_id=11)
+
+
+@pytest.mark.anyio
+async def test_get_forum_topic_icon_stickers_uses_outbox() -> None:
+    bot = FakeBot()
+    client = TelegramClient(client=bot, private_chat_rps=0.0, group_chat_rps=0.0)
+
+    stickers = await client.get_forum_topic_icon_stickers()
+
+    assert stickers and stickers[0].custom_emoji_id == "icon-1"
+    assert bot.topic_icon_calls == 1
 
 
 @pytest.mark.anyio

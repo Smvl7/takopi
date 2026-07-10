@@ -382,6 +382,7 @@ class TelegramClient:
             label="get_forum_topic_icon_stickers",
             execute=execute,
             priority=SEND_PRIORITY,
+            chat_id=0,
         )
 
     async def create_forum_topic(self, chat_id: int, name: str) -> ForumTopic | None:
