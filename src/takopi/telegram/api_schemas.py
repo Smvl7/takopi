@@ -34,6 +34,7 @@ class User(msgspec.Struct, forbid_unknown_fields=False):
     username: str | None = None
     first_name: str | None = None
     last_name: str | None = None
+    has_topics_enabled: bool | None = None
 
 
 class Chat(msgspec.Struct, forbid_unknown_fields=False):
