@@ -19,6 +19,7 @@ from ...runners.run_options import EngineRunOptions, apply_run_options
 from ...runner_bridge import (
     ExecBridgeConfig,
     IncomingMessage as RunnerIncomingMessage,
+    RunningTask,
     RunningTasks,
     handle_message,
 )
@@ -152,6 +153,7 @@ async def _run_engine(
     resume_token: ResumeToken | None,
     context: RunContext | None,
     reply_ref: MessageRef | None = None,
+    running_task: RunningTask | None = None,
     on_thread_known: Callable[[ResumeToken, anyio.Event], Awaitable[None]]
     | None = None,
     engine_override: EngineId | None = None,
@@ -231,6 +233,7 @@ async def _run_engine(
                     context_line=context_line,
                     strip_resume_line=runtime.is_resume_line,
                     running_tasks=running_tasks,
+                    running_task=running_task,
                     on_thread_known=on_thread_known,
                     progress_ref=progress_ref,
                 )

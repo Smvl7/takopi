@@ -9,7 +9,13 @@ import anyio
 
 from .context import RunContext
 from .logging import bind_run_context, get_logger
-from .model import CompletedEvent, ResumeToken, StartedEvent, TakopiEvent
+from .model import (
+    CompletedEvent,
+    ResumeToken,
+    StartedEvent,
+    TakopiEvent,
+    TitleChangedEvent,
+)
 from .presenter import Presenter
 from .markdown import render_event_cli
 from .runner import Runner, RunnerTurnControl
@@ -98,6 +104,7 @@ class RunningTask:
     done: anyio.Event = field(default_factory=anyio.Event)
     context: RunContext | None = None
     control: RunnerTurnControl | None = None
+    title: str | None = None
 
 
 RunningTasks = dict[MessageRef, RunningTask]
@@ -339,6 +346,15 @@ async def run_runner_with_cancel(
                         bind_run_context(resume=evt.resume.value)
                         if running_task is not None and running_task.resume is None:
                             running_task.resume = evt.resume
+                            # A prompt-derived title is only a fallback for a brand-new
+                            # session. Generating it while resuming would rename the
+                            # Telegram topic on every user message.
+                            if not running_task.title and resume_token is None:
+                                prompt_clean = " ".join(prompt.split())
+                                new_title = prompt_clean[:40] + (
+                                    "..." if len(prompt_clean) > 40 else ""
+                                )
+                                running_task.title = new_title
                             if evt.meta is not None:
                                 control = evt.meta.get("control")
                                 if control is not None:
@@ -348,6 +364,16 @@ async def run_runner_with_cancel(
                                     await on_thread_known(evt.resume, running_task.done)
                             finally:
                                 running_task.resume_ready.set()
+                    elif isinstance(evt, TitleChangedEvent):
+                        if running_task is not None:
+                            running_task.title = evt.title
+                            if (
+                                on_thread_known is not None
+                                and running_task.resume is not None
+                            ):
+                                await on_thread_known(
+                                    running_task.resume, running_task.done
+                                )
                     elif isinstance(evt, CompletedEvent):
                         outcome.resume = evt.resume or outcome.resume
                         outcome.completed = evt
@@ -433,6 +459,7 @@ async def handle_message(
     context_line: str | None = None,
     strip_resume_line: Callable[[str], bool] | None = None,
     running_tasks: RunningTasks | None = None,
+    running_task: RunningTask | None = None,
     on_thread_known: Callable[[ResumeToken, anyio.Event], Awaitable[None]]
     | None = None,
     progress_ref: MessageRef | None = None,
@@ -481,7 +508,6 @@ async def handle_message(
         started_at=started_at,
         clock=clock,
         last_rendered=progress_state.last_rendered,
-
         resume_formatter=runner.format_resume,
         context_line=context_line,
         progress_updates=cfg.progress_updates,
@@ -489,7 +515,9 @@ async def handle_message(
         thread_id=incoming.thread_id,
     )
 
-    running_task = RunningTask(context=context)
+    running_task = running_task or RunningTask(context=context)
+    if running_task.context is None:
+        running_task.context = context
     if running_tasks is not None and progress_ref is not None:
         running_tasks[progress_ref] = running_task
 

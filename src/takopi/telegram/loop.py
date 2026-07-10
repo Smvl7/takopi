@@ -486,7 +486,7 @@ class TelegramLoopState:
 
 
 if TYPE_CHECKING:
-    from ..runner_bridge import RunningTasks
+    from ..runner_bridge import RunningTask, RunningTasks
 
 
 _FORWARD_FIELDS = (
@@ -1177,6 +1177,7 @@ async def run_main_loop(
                 base_cb: Callable[[ResumeToken, anyio.Event], Awaitable[None]] | None,
                 topic_key: tuple[int, int] | None,
                 chat_session_key: tuple[int, int | None] | None,
+                running_task: RunningTask | None = None,
             ) -> Callable[[ResumeToken, anyio.Event], Awaitable[None]] | None:
                 if base_cb is None and topic_key is None and chat_session_key is None:
                     return None
@@ -1188,6 +1189,26 @@ async def run_main_loop(
                         await state.topic_store.set_session_resume(
                             topic_key[0], topic_key[1], token
                         )
+                        if running_task is not None and running_task.title:
+                            # Check if the title actually changed to avoid spamming the API.
+                            snapshot = await state.topic_store.get_thread(*topic_key)
+                            context = snapshot.context if snapshot else None
+                            current_title = snapshot.topic_title if snapshot else None
+                            new_title = running_task.title
+                            is_bound = context is not None and (
+                                context.project or context.branch
+                            )
+                            if not is_bound and current_title != new_title:
+                                await state.topic_store.set_context(
+                                    *topic_key,
+                                    context or RunContext(project=None, branch=None),
+                                    topic_title=new_title,
+                                )
+                                await cfg.bot.edit_forum_topic(
+                                    chat_id=topic_key[0],
+                                    message_thread_id=topic_key[1],
+                                    name=new_title,
+                                )
                     if (
                         state.chat_session_store is not None
                         and chat_session_key is not None
@@ -1245,6 +1266,9 @@ async def run_main_loop(
                     chat_prefs=state.chat_prefs,
                     topic_store=state.topic_store,
                 )
+                from ..runner_bridge import RunningTask
+
+                running_task = RunningTask(context=context)
                 await run_engine(
                     exec_cfg=cfg.exec_cfg,
                     runtime=cfg.runtime,
@@ -1255,8 +1279,9 @@ async def run_main_loop(
                     resume_token=resume_token,
                     context=context,
                     reply_ref=reply_ref,
+                    running_task=running_task,
                     on_thread_known=wrap_on_thread_known(
-                        on_thread_known, topic_key, chat_session_key
+                        on_thread_known, topic_key, chat_session_key, running_task
                     ),
                     engine_override=engine_override,
                     thread_id=thread_id,
@@ -1818,6 +1843,7 @@ async def run_main_loop(
                                 scheduler.note_thread_known,
                                 topic_key,
                                 chat_session_key,
+                                None,
                             ),
                             stateful_mode,
                             default_engine_override,
@@ -1962,6 +1988,7 @@ async def run_main_loop(
                                     scheduler.note_thread_known,
                                     ctx.topic_key,
                                     ctx.chat_session_key,
+                                    None,
                                 ),
                                 ctx.stateful_mode,
                                 default_engine_override,

@@ -23,6 +23,7 @@ type TakopiEventType = Literal[
     "started",
     "action",
     "completed",
+    "title_changed",
 ]
 
 type ActionPhase = Literal["started", "updated", "completed"]
@@ -74,4 +75,10 @@ class CompletedEvent:
     usage: dict[str, Any] | None = None
 
 
-type TakopiEvent = StartedEvent | ActionEvent | CompletedEvent
+@dataclass(frozen=True, slots=True)
+class TitleChangedEvent:
+    type: Literal["title_changed"] = field(default="title_changed", init=False)
+    engine: EngineId
+    title: str
+
+type TakopiEvent = StartedEvent | ActionEvent | CompletedEvent | TitleChangedEvent

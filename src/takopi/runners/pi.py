@@ -25,6 +25,7 @@ from ..model import (
     ResumeToken,
     StartedEvent,
     TakopiEvent,
+    TitleChangedEvent,
 )
 from ..runner import JsonlSubprocessRunner, ResumeTokenMixin, Runner
 from .run_options import get_run_options
@@ -181,6 +182,11 @@ def translate_pi_event(
         state.started = True
 
     match event:
+        case pi_schema.SessionInfoChanged(name=session_name):
+            if session_name:
+                out.append(TitleChangedEvent(engine=ENGINE, title=session_name))
+            return out
+
         case pi_schema.ToolExecutionStart(
             toolCallId=tool_id, toolName=tool_name, args=args
         ):
