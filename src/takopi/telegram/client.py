@@ -9,7 +9,7 @@ import anyio
 import httpx
 
 from ..logging import get_logger
-from .api_models import Chat, ChatMember, File, ForumTopic, Message, Update, User
+from .api_models import Chat, ChatMember, File, ForumTopic, Message, Sticker, Update, User
 from .client_api import BotClient, HttpBotClient, TelegramRetryAfter
 from .outbox import (
     DELETE_PRIORITY,
@@ -373,6 +373,17 @@ class TelegramClient:
             chat_id=chat_id,
         )
 
+    async def get_forum_topic_icon_stickers(self) -> list[Sticker] | None:
+        async def execute() -> list[Sticker] | None:
+            return await self._client.get_forum_topic_icon_stickers()
+
+        return await self.enqueue_op(
+            key=self.unique_key("get_forum_topic_icon_stickers"),
+            label="get_forum_topic_icon_stickers",
+            execute=execute,
+            priority=SEND_PRIORITY,
+        )
+
     async def create_forum_topic(self, chat_id: int, name: str) -> ForumTopic | None:
         async def execute() -> ForumTopic | None:
             return await self._client.create_forum_topic(chat_id, name)
@@ -390,12 +401,20 @@ class TelegramClient:
         chat_id: int,
         message_thread_id: int,
         name: str,
+        icon_custom_emoji_id: str | None = None,
     ) -> bool:
         async def execute() -> bool:
+            if icon_custom_emoji_id is None:
+                return await self._client.edit_forum_topic(
+                    chat_id,
+                    message_thread_id,
+                    name,
+                )
             return await self._client.edit_forum_topic(
                 chat_id,
                 message_thread_id,
                 name,
+                icon_custom_emoji_id=icon_custom_emoji_id,
             )
 
         return bool(

@@ -78,6 +78,10 @@ class Voice(msgspec.Struct, forbid_unknown_fields=False):
 class Sticker(msgspec.Struct, forbid_unknown_fields=False):
     file_id: str
     file_size: int | None = None
+    emoji: str | None = None
+    custom_emoji_id: str | None = None
+    is_animated: bool | None = None
+    is_video: bool | None = None
 
 
 class MessageReply(msgspec.Struct, forbid_unknown_fields=False):

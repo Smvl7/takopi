@@ -58,12 +58,14 @@ from .commands.handlers import (
     set_command_menu,
     should_show_resume_line,
 )
+from .api_models import Sticker
 from .commands.parse import is_cancel_command
 from .commands.reply import make_reply
 from .context import _merge_topic_context, _usage_ctx_set, _usage_topic
 from .topics import (
     _maybe_rename_topic,
     _resolve_topics_scope,
+    _topic_icon_choice,
     _topic_key,
     _topics_chat_allowed,
     _topics_chat_project,
@@ -464,6 +466,7 @@ def _classify_message(
 @dataclass(slots=True)
 class TelegramLoopState:
     running_tasks: RunningTasks
+    topic_icon_stickers: list[Sticker] | None
     pending_prompts: dict[ForwardKey, _PendingPrompt]
     media_groups: dict[tuple[int, str], _MediaGroupState]
     command_ids: set[str]
@@ -1019,6 +1022,7 @@ async def run_main_loop(
 ) -> None:
     state = TelegramLoopState(
         running_tasks={},
+        topic_icon_stickers=None,
         pending_prompts={},
         media_groups={},
         command_ids={
@@ -1173,6 +1177,17 @@ async def run_main_loop(
 
                 tg.start_soon(run_config_watch)
 
+            async def resolve_topic_icon(title: str) -> tuple[str, str | None]:
+                first, separator, remainder = title.partition(" ")
+                if not separator or not remainder.strip():
+                    return title, None
+
+                if state.topic_icon_stickers is None:
+                    stickers = await cfg.bot.get_forum_topic_icon_stickers()
+                    state.topic_icon_stickers = stickers or []
+
+                return _topic_icon_choice(title, state.topic_icon_stickers)
+
             def wrap_on_thread_known(
                 base_cb: Callable[[ResumeToken, anyio.Event], Awaitable[None]] | None,
                 topic_key: tuple[int, int] | None,
@@ -1193,22 +1208,27 @@ async def run_main_loop(
                             # Check if the title actually changed to avoid spamming the API.
                             snapshot = await state.topic_store.get_thread(*topic_key)
                             context = snapshot.context if snapshot else None
+                            new_title, icon_id = await resolve_topic_icon(
+                                running_task.title
+                            )
                             current_title = snapshot.topic_title if snapshot else None
-                            new_title = running_task.title
                             is_bound = context is not None and (
                                 context.project or context.branch
                             )
                             if not is_bound and current_title != new_title:
-                                await state.topic_store.set_context(
-                                    *topic_key,
-                                    context or RunContext(project=None, branch=None),
-                                    topic_title=new_title,
-                                )
-                                await cfg.bot.edit_forum_topic(
+                                updated = await cfg.bot.edit_forum_topic(
                                     chat_id=topic_key[0],
                                     message_thread_id=topic_key[1],
                                     name=new_title,
+                                    icon_custom_emoji_id=icon_id,
                                 )
+                                if updated:
+                                    await state.topic_store.set_context(
+                                        *topic_key,
+                                        context
+                                        or RunContext(project=None, branch=None),
+                                        topic_title=new_title,
+                                    )
                     if (
                         state.chat_session_store is not None
                         and chat_session_key is not None

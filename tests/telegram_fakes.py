@@ -13,6 +13,7 @@ from takopi.telegram.api_models import (
     File,
     ForumTopic,
     Message,
+    Sticker,
     Update,
     User,
 )
@@ -94,6 +95,7 @@ class FakeBot(BotClient):
         self.document_calls: list[dict] = []
         self.edit_calls: list[dict] = []
         self.edit_topic_calls: list[dict[str, Any]] = []
+        self.topic_icon_stickers: list[Sticker] = []
         self.delete_calls: list[dict] = []
 
     async def get_updates(
@@ -222,19 +224,27 @@ class FakeBot(BotClient):
         _ = user_id
         return ChatMember(status="administrator", can_manage_topics=True)
 
+    async def get_forum_topic_icon_stickers(self) -> list[Sticker] | None:
+        return self.topic_icon_stickers
+
     async def create_forum_topic(self, chat_id: int, name: str) -> ForumTopic | None:
         _ = chat_id
         _ = name
         return ForumTopic(message_thread_id=1)
 
     async def edit_forum_topic(
-        self, chat_id: int, message_thread_id: int, name: str
+        self,
+        chat_id: int,
+        message_thread_id: int,
+        name: str,
+        icon_custom_emoji_id: str | None = None,
     ) -> bool:
         self.edit_topic_calls.append(
             {
                 "chat_id": chat_id,
                 "message_thread_id": message_thread_id,
                 "name": name,
+                "icon_custom_emoji_id": icon_custom_emoji_id,
             }
         )
         return True

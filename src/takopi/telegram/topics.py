@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+import random
 from typing import TYPE_CHECKING
+import unicodedata
 
 from ..config import ConfigError
 from ..context import RunContext
 from ..settings import TelegramTopicsSettings
 from ..transport_runtime import TransportRuntime
+from .api_models import Sticker
 from .client import BotClient
 from .topic_state import TopicStateStore, TopicThreadSnapshot
 from .types import TelegramIncomingMessage
@@ -19,6 +22,7 @@ __all__ = [
     "_maybe_rename_topic",
     "_maybe_update_topic_context",
     "_resolve_topics_scope",
+    "_topic_icon_choice",
     "_topic_key",
     "_topic_title",
     "_topics_chat_allowed",
@@ -29,6 +33,28 @@ __all__ = [
 ]
 
 _TOPICS_COMMANDS = {"ctx", "new", "topic"}
+
+
+def _looks_like_emoji(value: str) -> bool:
+    return any(unicodedata.category(char) == "So" for char in value)
+
+
+def _topic_icon_choice(
+    title: str, stickers: Iterable[Sticker]
+) -> tuple[str, str | None]:
+    """Move a leading emoji into the icon, using a random allowed fallback."""
+    first, separator, remainder = title.partition(" ")
+    if not separator or not remainder.strip() or not _looks_like_emoji(first):
+        return title, None
+
+    available = [sticker for sticker in stickers if sticker.custom_emoji_id]
+    emoji_key = first.replace("\ufe0f", "")
+    for sticker in available:
+        if sticker.emoji and sticker.emoji.replace("\ufe0f", "") == emoji_key:
+            return remainder.strip(), sticker.custom_emoji_id
+
+    fallback = random.choice(available) if available else None
+    return remainder.strip(), fallback.custom_emoji_id if fallback else None
 
 
 def _resolve_topics_scope_raw(

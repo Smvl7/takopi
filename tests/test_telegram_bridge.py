@@ -14,7 +14,15 @@ from takopi.telegram.commands.topics import _handle_topic_command
 import takopi.telegram.loop as telegram_loop
 import takopi.telegram.topics as telegram_topics
 from takopi.directives import parse_directives
-from takopi.telegram.api_models import Chat, File, ForumTopic, Message, Update, User
+from takopi.telegram.api_models import (
+    Chat,
+    File,
+    ForumTopic,
+    Message,
+    Sticker,
+    Update,
+    User,
+)
 from takopi.settings import TelegramFilesSettings, TelegramTopicsSettings
 from takopi.telegram.bridge import (
     TelegramBridgeConfig,
@@ -1271,6 +1279,53 @@ def test_is_forwarded_detects_forward_fields() -> None:
     assert telegram_loop._is_forwarded({"is_automatic_forward": True})
     assert not telegram_loop._is_forwarded({"text": "hello"})
     assert not telegram_loop._is_forwarded(None)
+
+
+def test_topic_icon_choice_uses_animated_custom_emoji() -> None:
+    title, icon_id = telegram_topics._topic_icon_choice(
+        "📊 Retention по новым пользователям",
+        [
+            Sticker(
+                file_id="sticker-1",
+                emoji="📊️",
+                custom_emoji_id="animated-icon-1",
+                is_animated=True,
+            )
+        ],
+    )
+
+    assert title == "Retention по новым пользователям"
+    assert icon_id == "animated-icon-1"
+
+
+def test_topic_icon_choice_uses_random_allowed_icon_for_unknown_emoji() -> None:
+    title, icon_id = telegram_topics._topic_icon_choice(
+        "🐛 Исправление смены названия",
+        [Sticker(file_id="sticker-1", emoji="📈", custom_emoji_id="icon-1")],
+    )
+
+    assert title == "Исправление смены названия"
+    assert icon_id == "icon-1"
+
+
+def test_topic_icon_choice_removes_emoji_when_icon_list_is_unavailable() -> None:
+    title, icon_id = telegram_topics._topic_icon_choice(
+        "🐛 Исправление смены названия",
+        [],
+    )
+
+    assert title == "Исправление смены названия"
+    assert icon_id is None
+
+
+def test_topic_icon_choice_does_not_strip_regular_first_word() -> None:
+    title, icon_id = telegram_topics._topic_icon_choice(
+        "Исправление смены названия",
+        [Sticker(file_id="sticker-1", emoji="📈", custom_emoji_id="icon-1")],
+    )
+
+    assert title == "Исправление смены названия"
+    assert icon_id is None
 
 
 def test_topic_title_matches_command_syntax() -> None:

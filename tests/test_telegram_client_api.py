@@ -80,6 +80,14 @@ async def test_client_methods_build_params_and_decode() -> None:
         "answerCallbackQuery": True,
         "getChat": {"id": 5, "type": "private"},
         "getChatMember": {"status": "member"},
+        "getForumTopicIconStickers": [
+            {
+                "file_id": "sticker-1",
+                "emoji": "📊",
+                "custom_emoji_id": "icon-1",
+                "is_animated": True,
+            }
+        ],
         "createForumTopic": {"message_thread_id": 11},
         "editForumTopic": True,
     }
@@ -149,8 +157,13 @@ async def test_client_methods_build_params_and_decode() -> None:
     assert await client.answer_callback_query("cb", text="ok", show_alert=True) is True
     assert await client.get_chat(1) is not None
     assert await client.get_chat_member(1, 2) is not None
+    stickers = await client.get_forum_topic_icon_stickers()
+    assert stickers and stickers[0].custom_emoji_id == "icon-1"
+    assert stickers[0].is_animated is True
     assert await client.create_forum_topic(1, "topic") is not None
-    assert await client.edit_forum_topic(1, 2, "topic") is True
+    assert await client.edit_forum_topic(
+        1, 2, "topic", icon_custom_emoji_id="icon-1"
+    ) is True
 
     await client.close()
 
@@ -169,6 +182,9 @@ async def test_client_methods_build_params_and_decode() -> None:
 
     edit_call = next(call for call in client.calls if call[0] == "editMessageText")
     assert edit_call[1]["link_preview_options"] == {"is_disabled": True}
+
+    topic_call = next(call for call in client.calls if call[0] == "editForumTopic")
+    assert topic_call[1]["icon_custom_emoji_id"] == "icon-1"
 
 
 @pytest.mark.anyio

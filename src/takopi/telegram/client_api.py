@@ -6,7 +6,7 @@ import httpx
 import msgspec
 
 from ..logging import get_logger
-from .api_models import Chat, ChatMember, File, ForumTopic, Message, Update, User
+from .api_models import Chat, ChatMember, File, ForumTopic, Message, Sticker, Update, User
 
 logger = get_logger(__name__)
 
@@ -114,6 +114,8 @@ class BotClient(Protocol):
         self, chat_id: int, user_id: int
     ) -> ChatMember | None: ...
 
+    async def get_forum_topic_icon_stickers(self) -> list[Sticker] | None: ...
+
     async def create_forum_topic(
         self,
         chat_id: int,
@@ -125,6 +127,7 @@ class BotClient(Protocol):
         chat_id: int,
         message_thread_id: int,
         name: str,
+        icon_custom_emoji_id: str | None = None,
     ) -> bool: ...
 
     async def send_chat_action(
@@ -522,6 +525,20 @@ class HttpBotClient:
             model=ChatMember,
         )
 
+    async def get_forum_topic_icon_stickers(self) -> list[Sticker] | None:
+        result = await self._post("getForumTopicIconStickers", {})
+        if not isinstance(result, list):
+            return None
+        try:
+            return msgspec.convert(result, type=list[Sticker])
+        except (TypeError, ValueError, msgspec.ValidationError) as exc:
+            logger.error(
+                "telegram.decode_error",
+                method="getForumTopicIconStickers",
+                error=str(exc),
+            )
+            return None
+
     async def create_forum_topic(self, chat_id: int, name: str) -> ForumTopic | None:
         result = await self._post(
             "createForumTopic", {"chat_id": chat_id, "name": name}
@@ -537,15 +554,16 @@ class HttpBotClient:
         chat_id: int,
         message_thread_id: int,
         name: str,
+        icon_custom_emoji_id: str | None = None,
     ) -> bool:
-        result = await self._post(
-            "editForumTopic",
-            {
-                "chat_id": chat_id,
-                "message_thread_id": message_thread_id,
-                "name": name,
-            },
-        )
+        params: dict[str, Any] = {
+            "chat_id": chat_id,
+            "message_thread_id": message_thread_id,
+            "name": name,
+        }
+        if icon_custom_emoji_id is not None:
+            params["icon_custom_emoji_id"] = icon_custom_emoji_id
+        result = await self._post("editForumTopic", params)
         return bool(result)
 
     async def send_chat_action(
