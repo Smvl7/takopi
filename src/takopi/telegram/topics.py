@@ -226,6 +226,13 @@ async def _validate_topics_setup_for(
             raise ConfigError(
                 f"failed to fetch chat info for topics validation ({chat_id})."
             )
+        if chat.type == "private":
+            if me.has_topics_enabled is not True:
+                raise ConfigError(
+                    f"topics enabled for private chat {chat_id}, but the bot doesn't "
+                    "have topics enabled. Turn on 'Topics in Private Chats' via @BotFather."
+                )
+            continue
         if chat.type != "supergroup":
             raise ConfigError(
                 "topics enabled but chat is not a supergroup "
