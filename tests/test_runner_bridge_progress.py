@@ -2,7 +2,6 @@ import pytest
 import anyio
 from takopi.runner_bridge import ExecBridgeConfig, IncomingMessage, handle_message
 from takopi.markdown import MarkdownPresenter
-from takopi.model import TakopiEvent
 from takopi.runners.mock import Advance, Emit, Return, ScriptRunner, Sleep
 from takopi.transport import MessageRef, RenderedMessage, SendOptions
 from tests.factories import action_started
@@ -163,6 +162,47 @@ async def test_progress_none_sends_no_initial() -> None:
     # Should send final result
     assert transport.send_calls
     assert "done" in transport.send_calls[-1]["message"].text or "ok" in transport.send_calls[-1]["message"].text
+
+
+@pytest.mark.anyio
+async def test_progress_none_keeps_running_task_cancellable() -> None:
+    transport = FakeTransport()
+    runner = ScriptRunner([Sleep(10), Return("ok")], engine="mock")
+    cfg = ExecBridgeConfig(
+        transport=transport,
+        presenter=MarkdownPresenter(),
+        final_notify=True,
+        progress_updates="none",
+        show_typing=False,
+    )
+    running_tasks = {}
+    incoming = IncomingMessage(
+        channel_id=123,
+        message_id=10,
+        text="hi",
+        thread_id=7,
+    )
+
+    async def run_message() -> None:
+        await handle_message(
+            cfg,
+            runner=runner,
+            incoming=incoming,
+            resume_token=None,
+            running_tasks=running_tasks,
+        )
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(run_message)
+        with anyio.fail_after(1):
+            while not running_tasks:
+                await anyio.sleep(0)
+        task = running_tasks[MessageRef(channel_id=123, message_id=10)]
+        assert task.thread_id == 7
+        task.cancel_requested.set()
+
+    assert running_tasks == {}
+
 
 @pytest.mark.anyio
 async def test_show_typing_sends_actions() -> None:
