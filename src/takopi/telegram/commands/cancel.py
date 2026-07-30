@@ -45,9 +45,19 @@ async def handle_cancel(
             await _edit_cancelled_message(cfg, progress_ref, job)
             return
 
-    # Telegram users often reply to their prompt (or send /cancel directly) rather
-    # than reply to the bot's progress message. Match the logical topic stored on
-    # the running task: Telegram can omit thread_id on the bot's progress message.
+    # Telegram users often reply to their own prompt rather than to the bot's
+    # progress message. Match that prompt explicitly before falling back to topic.
+    if running_task is None and reply_id is not None:
+        prompt_candidates = [
+            (ref, task)
+            for ref, task in running_tasks.items()
+            if ref.channel_id == chat_id and task.user_message_id == reply_id
+        ]
+        if len(prompt_candidates) == 1:
+            progress_ref, running_task = prompt_candidates[0]
+
+    # For a direct /cancel or a reply to another message, match the logical topic
+    # stored on the task. Telegram can omit thread_id on the progress message.
     if running_task is None:
         candidates = [
             (ref, task)
@@ -77,6 +87,22 @@ async def handle_cancel(
             await reply(text="reply to the progress message to cancel.")
             return
         else:
+            logger.info(
+                "cancel.not_found",
+                chat_id=chat_id,
+                thread_id=msg.thread_id,
+                replied_message_id=reply_id,
+                active=[
+                    {
+                        "progress_message_id": ref.message_id,
+                        "progress_thread_id": ref.thread_id,
+                        "task_thread_id": task.thread_id,
+                        "user_message_id": task.user_message_id,
+                    }
+                    for ref, task in running_tasks.items()
+                    if ref.channel_id == chat_id
+                ],
+            )
             await reply(text="nothing is currently running for that message.")
             return
 

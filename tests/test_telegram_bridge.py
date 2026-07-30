@@ -687,6 +687,31 @@ async def test_handle_cancel_tolerates_missing_progress_thread_id() -> None:
 
 
 @pytest.mark.anyio
+async def test_handle_cancel_reply_to_prompt_ignores_missing_topic_metadata() -> None:
+    transport = FakeTransport()
+    cfg = make_cfg(transport)
+    running_task = RunningTask(thread_id=7, user_message_id=41)
+    running_tasks = {
+        MessageRef(channel_id=123, message_id=42, thread_id=None): running_task,
+    }
+    msg = TelegramIncomingMessage(
+        transport="telegram",
+        chat_id=123,
+        message_id=10,
+        text="/cancel",
+        reply_to_message_id=41,
+        reply_to_text="run this",
+        sender_id=123,
+        thread_id=None,
+    )
+
+    await handle_cancel(cfg, msg, running_tasks)
+
+    assert running_task.cancel_requested.is_set() is True
+    assert len(transport.send_calls) == 0
+
+
+@pytest.mark.anyio
 async def test_handle_cancel_wrong_reply_cancels_only_run_in_topic() -> None:
     transport = FakeTransport()
     cfg = make_cfg(transport)
