@@ -99,6 +99,7 @@ class ExecBridgeConfig:
 @dataclass(slots=True)
 class RunningTask:
     resume: ResumeToken | None = None
+    thread_id: ThreadId | None = None
     resume_ready: anyio.Event = field(default_factory=anyio.Event)
     cancel_requested: anyio.Event = field(default_factory=anyio.Event)
     done: anyio.Event = field(default_factory=anyio.Event)
@@ -518,6 +519,7 @@ async def handle_message(
     running_task = running_task or RunningTask(context=context)
     if running_task.context is None:
         running_task.context = context
+    running_task.thread_id = incoming.thread_id
     if running_tasks is not None and progress_ref is not None:
         running_tasks[progress_ref] = running_task
 

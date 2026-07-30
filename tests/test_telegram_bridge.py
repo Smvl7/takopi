@@ -637,6 +637,106 @@ async def test_handle_cancel_without_reply_prompts_user() -> None:
 
 
 @pytest.mark.anyio
+async def test_handle_cancel_without_reply_cancels_only_run_in_topic() -> None:
+    transport = FakeTransport()
+    cfg = make_cfg(transport)
+    running_task = RunningTask(thread_id=7)
+    running_tasks = {
+        MessageRef(channel_id=123, message_id=42, thread_id=7): running_task,
+    }
+    msg = TelegramIncomingMessage(
+        transport="telegram",
+        chat_id=123,
+        message_id=10,
+        text="/cancel",
+        reply_to_message_id=None,
+        reply_to_text=None,
+        sender_id=123,
+        thread_id=7,
+    )
+
+    await handle_cancel(cfg, msg, running_tasks)
+
+    assert running_task.cancel_requested.is_set() is True
+    assert len(transport.send_calls) == 0
+
+
+@pytest.mark.anyio
+async def test_handle_cancel_tolerates_missing_progress_thread_id() -> None:
+    transport = FakeTransport()
+    cfg = make_cfg(transport)
+    running_task = RunningTask(thread_id=7)
+    running_tasks = {
+        MessageRef(channel_id=123, message_id=42, thread_id=None): running_task,
+    }
+    msg = TelegramIncomingMessage(
+        transport="telegram",
+        chat_id=123,
+        message_id=10,
+        text="/cancel",
+        reply_to_message_id=None,
+        reply_to_text=None,
+        sender_id=123,
+        thread_id=7,
+    )
+
+    await handle_cancel(cfg, msg, running_tasks)
+
+    assert running_task.cancel_requested.is_set() is True
+    assert len(transport.send_calls) == 0
+
+
+@pytest.mark.anyio
+async def test_handle_cancel_wrong_reply_cancels_only_run_in_topic() -> None:
+    transport = FakeTransport()
+    cfg = make_cfg(transport)
+    running_task = RunningTask(thread_id=7)
+    running_tasks = {
+        MessageRef(channel_id=123, message_id=42, thread_id=7): running_task,
+    }
+    msg = TelegramIncomingMessage(
+        transport="telegram",
+        chat_id=123,
+        message_id=10,
+        text="/cancel",
+        reply_to_message_id=99,
+        reply_to_text="user prompt",
+        sender_id=123,
+        thread_id=7,
+    )
+
+    await handle_cancel(cfg, msg, running_tasks)
+
+    assert running_task.cancel_requested.is_set() is True
+    assert len(transport.send_calls) == 0
+
+
+@pytest.mark.anyio
+async def test_handle_cancel_fallback_does_not_cross_topics() -> None:
+    transport = FakeTransport()
+    cfg = make_cfg(transport)
+    task_other_topic = RunningTask(thread_id=8)
+    running_tasks = {
+        MessageRef(channel_id=123, message_id=42, thread_id=8): task_other_topic,
+    }
+    msg = TelegramIncomingMessage(
+        transport="telegram",
+        chat_id=123,
+        message_id=10,
+        text="/cancel",
+        reply_to_message_id=99,
+        reply_to_text="user prompt",
+        sender_id=123,
+        thread_id=7,
+    )
+
+    await handle_cancel(cfg, msg, running_tasks)
+
+    assert task_other_topic.cancel_requested.is_set() is False
+    assert "nothing is currently running" in transport.send_calls[0]["message"].text
+
+
+@pytest.mark.anyio
 async def test_handle_cancel_with_no_progress_message_says_nothing_running() -> None:
     transport = FakeTransport()
     cfg = make_cfg(transport)
