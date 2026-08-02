@@ -26,34 +26,90 @@ async def handle_cancel(
     chat_id = msg.chat_id
     reply_id = msg.reply_to_message_id
 
-    if reply_id is None:
-        if msg.reply_to_text:
+    progress_ref = (
+        MessageRef(channel_id=chat_id, message_id=reply_id)
+        if reply_id is not None
+        else None
+    )
+    running_task = running_tasks.get(progress_ref) if progress_ref is not None else None
+
+    if running_task is None and reply_id is not None and scheduler is not None:
+        job = await scheduler.cancel_queued(chat_id, reply_id)
+        if job is not None:
+            logger.info(
+                "cancel.queued",
+                chat_id=chat_id,
+                progress_message_id=reply_id,
+                resume=job.resume_token.value,
+            )
+            await _edit_cancelled_message(cfg, progress_ref, job)
+            return
+
+    # Telegram users often reply to their own prompt rather than to the bot's
+    # progress message. Match that prompt explicitly before falling back to topic.
+    if running_task is None and reply_id is not None:
+        prompt_candidates = [
+            (ref, task)
+            for ref, task in running_tasks.items()
+            if ref.channel_id == chat_id and task.user_message_id == reply_id
+        ]
+        if len(prompt_candidates) == 1:
+            progress_ref, running_task = prompt_candidates[0]
+
+    # For a direct /cancel or a reply to another message, match the logical topic
+    # stored on the task. Telegram can omit thread_id on the progress message.
+    if running_task is None:
+        candidates = [
+            (ref, task)
+            for ref, task in running_tasks.items()
+            if ref.channel_id == chat_id and task.thread_id == msg.thread_id
+        ]
+        if len(candidates) == 1:
+            progress_ref, running_task = candidates[0]
+            logger.info(
+                "cancel.fallback",
+                chat_id=chat_id,
+                thread_id=msg.thread_id,
+                progress_thread_id=progress_ref.thread_id,
+                task_thread_id=running_task.thread_id,
+                replied_message_id=reply_id,
+                progress_message_id=progress_ref.message_id,
+            )
+        elif len(candidates) > 1:
+            await reply(
+                text=(
+                    "multiple runs are active; "
+                    "reply to the progress message to cancel one."
+                )
+            )
+            return
+        elif reply_id is None and not msg.reply_to_text:
+            await reply(text="reply to the progress message to cancel.")
+            return
+        else:
+            logger.info(
+                "cancel.not_found",
+                chat_id=chat_id,
+                thread_id=msg.thread_id,
+                replied_message_id=reply_id,
+                active=[
+                    {
+                        "progress_message_id": ref.message_id,
+                        "progress_thread_id": ref.thread_id,
+                        "task_thread_id": task.thread_id,
+                        "user_message_id": task.user_message_id,
+                    }
+                    for ref, task in running_tasks.items()
+                    if ref.channel_id == chat_id
+                ],
+            )
             await reply(text="nothing is currently running for that message.")
             return
-        await reply(text="reply to the progress message to cancel.")
-        return
-
-    progress_ref = MessageRef(channel_id=chat_id, message_id=reply_id)
-    running_task = running_tasks.get(progress_ref)
-    if running_task is None:
-        if scheduler is not None:
-            job = await scheduler.cancel_queued(chat_id, reply_id)
-            if job is not None:
-                logger.info(
-                    "cancel.queued",
-                    chat_id=chat_id,
-                    progress_message_id=reply_id,
-                    resume=job.resume_token.value,
-                )
-                await _edit_cancelled_message(cfg, progress_ref, job)
-                return
-        await reply(text="nothing is currently running for that message.")
-        return
 
     logger.info(
         "cancel.requested",
         chat_id=chat_id,
-        progress_message_id=reply_id,
+        progress_message_id=progress_ref.message_id,
     )
     running_task.cancel_requested.set()
 

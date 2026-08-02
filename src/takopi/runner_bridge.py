@@ -99,6 +99,8 @@ class ExecBridgeConfig:
 @dataclass(slots=True)
 class RunningTask:
     resume: ResumeToken | None = None
+    thread_id: ThreadId | None = None
+    user_message_id: MessageId | None = None
     resume_ready: anyio.Event = field(default_factory=anyio.Event)
     cancel_requested: anyio.Event = field(default_factory=anyio.Event)
     done: anyio.Event = field(default_factory=anyio.Event)
@@ -518,8 +520,11 @@ async def handle_message(
     running_task = running_task or RunningTask(context=context)
     if running_task.context is None:
         running_task.context = context
-    if running_tasks is not None and progress_ref is not None:
-        running_tasks[progress_ref] = running_task
+    running_task.thread_id = incoming.thread_id
+    running_task.user_message_id = incoming.message_id
+    running_ref = progress_ref or user_ref
+    if running_tasks is not None:
+        running_tasks[running_ref] = running_task
 
     cancel_exc_type = anyio.get_cancelled_exc_class()
     edits_scope = anyio.CancelScope()
@@ -557,8 +562,8 @@ async def handle_message(
             )
         finally:
             running_task.done.set()
-            if running_tasks is not None and progress_ref is not None:
-                running_tasks.pop(progress_ref, None)
+            if running_tasks is not None:
+                running_tasks.pop(running_ref, None)
             if not outcome.cancelled and error is None:
                 # Give pending progress edits a chance to flush if they're ready.
                 await anyio.sleep(0)
