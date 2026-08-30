@@ -2,6 +2,7 @@ from pathlib import Path, PureWindowsPath
 from unittest.mock import patch
 
 import anyio
+import msgspec
 import pytest
 
 from takopi.model import ActionEvent, CompletedEvent, ResumeToken, StartedEvent
@@ -97,6 +98,137 @@ def test_translate_error_fixture() -> None:
     assert completed.ok is False
     assert completed.error == "Upstream error"
     assert completed.answer == "Request failed."
+
+
+def _assistant_message(
+    text: str, *, stop_reason: str, error: str | None = None
+) -> dict:
+    message = {
+        "role": "assistant",
+        "content": [{"type": "text", "text": text}],
+        "stopReason": stop_reason,
+    }
+    if error is not None:
+        message["errorMessage"] = error
+    return message
+
+
+def _translate_sequence(state: PiStreamState, events: list[pi_schema.PiEvent]) -> list:
+    translated: list = []
+    for event in events:
+        translated.extend(translate_pi_event(event, title="pi", meta=None, state=state))
+    return translated
+
+
+def test_translate_auto_retry_success_completes_on_settled() -> None:
+    state = PiStreamState(resume=ResumeToken(engine=ENGINE, value="session.jsonl"))
+    failed = _assistant_message(
+        "First attempt failed.", stop_reason="error", error="Rate limited"
+    )
+    succeeded = _assistant_message("Retry succeeded.", stop_reason="stop")
+
+    before_settled = _translate_sequence(
+        state,
+        [
+            pi_schema.MessageEnd(message=failed),
+            pi_schema.AgentEnd(messages=[failed], willRetry=True),
+            pi_schema.MessageEnd(message=succeeded),
+            pi_schema.AgentEnd(messages=[succeeded], willRetry=False),
+        ],
+    )
+    settled = _translate_sequence(
+        state, [pi_schema.AgentSettled(), pi_schema.AgentSettled()]
+    )
+
+    assert not any(isinstance(event, CompletedEvent) for event in before_settled)
+    completed = [event for event in settled if isinstance(event, CompletedEvent)]
+    assert len(completed) == 1
+    assert completed[0].ok is True
+    assert completed[0].answer == "Retry succeeded."
+    assert completed[0].error is None
+
+
+def test_translate_modern_agent_end_allows_continuation_before_settled() -> None:
+    state = PiStreamState(resume=ResumeToken(engine=ENGINE, value="session.jsonl"))
+    first = _assistant_message("Before compaction.", stop_reason="stop")
+    final = _assistant_message("After continuation.", stop_reason="stop")
+
+    events = _translate_sequence(
+        state,
+        [
+            pi_schema.AgentEnd(messages=[first], willRetry=False),
+            pi_schema.MessageEnd(message=final),
+            pi_schema.AgentEnd(messages=[final], willRetry=False),
+            pi_schema.AgentSettled(),
+        ],
+    )
+
+    completed = [event for event in events if isinstance(event, CompletedEvent)]
+    assert len(completed) == 1
+    assert completed[0].ok is True
+    assert completed[0].answer == "After continuation."
+
+
+def test_translate_legacy_agent_end_completes_and_settled_does_not_duplicate() -> None:
+    state = PiStreamState(resume=ResumeToken(engine=ENGINE, value="session.jsonl"))
+    succeeded = _assistant_message("Legacy success.", stop_reason="stop")
+    legacy = pi_schema.decode_event(
+        msgspec.json.encode({"type": "agent_end", "messages": [succeeded]})
+    )
+
+    events = _translate_sequence(state, [legacy, pi_schema.AgentSettled()])
+
+    completed = [event for event in events if isinstance(event, CompletedEvent)]
+    assert len(completed) == 1
+    assert completed[0].ok is True
+    assert completed[0].answer == "Legacy success."
+
+
+def test_translate_retry_exhausted_completes_on_settled() -> None:
+    state = PiStreamState(resume=ResumeToken(engine=ENGINE, value="session.jsonl"))
+    first_error = _assistant_message(
+        "First failure.", stop_reason="error", error="Temporary error"
+    )
+    final_error = _assistant_message(
+        "Final failure.", stop_reason="error", error="Retries exhausted"
+    )
+
+    events = _translate_sequence(
+        state,
+        [
+            pi_schema.AgentEnd(messages=[first_error], willRetry=True),
+            pi_schema.AgentEnd(messages=[final_error], willRetry=False),
+            pi_schema.AgentSettled(),
+        ],
+    )
+
+    completed = [event for event in events if isinstance(event, CompletedEvent)]
+    assert len(completed) == 1
+    assert completed[0].ok is False
+    assert completed[0].answer == "Final failure."
+    assert completed[0].error == "Retries exhausted"
+
+
+def test_empty_final_assistant_clears_stale_answer_and_usage() -> None:
+    state = PiStreamState(resume=ResumeToken(engine=ENGINE, value="session.jsonl"))
+    previous = _assistant_message("Stale answer.", stop_reason="stop")
+    previous["usage"] = {"totalTokens": 10}
+    empty = {"role": "assistant", "content": [], "stopReason": "stop"}
+
+    events = _translate_sequence(
+        state,
+        [
+            pi_schema.AgentEnd(messages=[previous], willRetry=False),
+            pi_schema.AgentEnd(messages=[empty], willRetry=False),
+            pi_schema.AgentSettled(),
+        ],
+    )
+
+    completed = [event for event in events if isinstance(event, CompletedEvent)]
+    assert len(completed) == 1
+    assert completed[0].ok is True
+    assert completed[0].answer == ""
+    assert completed[0].usage is None
 
 
 def test_session_id_promotion_from_stdout() -> None:
