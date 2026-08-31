@@ -50,6 +50,8 @@ class PiStreamState:
     last_assistant_text: str | None = None
     last_assistant_error: str | None = None
     last_usage: dict[str, Any] | None = None
+    has_modern_agent_end: bool = False
+    did_emit_completed: bool = False
     started: bool = False
     note_seq: int = 0
 
@@ -148,6 +150,24 @@ def _last_assistant_message(messages: Any) -> dict[str, Any] | None:
     return None
 
 
+def _update_assistant_state(state: PiStreamState, message: dict[str, Any]) -> None:
+    state.last_assistant_text = _extract_text_blocks(message.get("content"))
+    usage = message.get("usage")
+    state.last_usage = usage if isinstance(usage, dict) else None
+    state.last_assistant_error = _assistant_error(message)
+
+
+def _completion_from_assistant_state(state: PiStreamState) -> CompletedEvent:
+    return CompletedEvent(
+        engine=ENGINE,
+        ok=state.last_assistant_error is None,
+        answer=state.last_assistant_text or "",
+        resume=state.resume,
+        error=state.last_assistant_error,
+        usage=state.last_usage,
+    )
+
+
 def translate_pi_event(
     event: pi_schema.PiEvent,
     *,
@@ -232,44 +252,27 @@ def translate_pi_event(
 
         case pi_schema.MessageEnd(message=message):
             if isinstance(message, dict) and message.get("role") == "assistant":
-                text = _extract_text_blocks(message.get("content"))
-                if text:
-                    state.last_assistant_text = text
-                usage = message.get("usage")
-                if isinstance(usage, dict):
-                    state.last_usage = usage
-                error = _assistant_error(message)
-                if error:
-                    state.last_assistant_error = error
+                _update_assistant_state(state, message)
             return out
 
-        case pi_schema.AgentEnd(messages=messages):
+        case pi_schema.AgentEnd(messages=messages, willRetry=will_retry):
             assistant = _last_assistant_message(messages)
             if assistant:
-                text = _extract_text_blocks(assistant.get("content"))
-                if text:
-                    state.last_assistant_text = text
-                usage = assistant.get("usage")
-                if isinstance(usage, dict):
-                    state.last_usage = usage
-                error = _assistant_error(assistant)
-                if error:
-                    state.last_assistant_error = error
+                _update_assistant_state(state, assistant)
 
-            ok = state.last_assistant_error is None
-            error = state.last_assistant_error
-            answer = state.last_assistant_text or ""
+            if will_retry is not None:
+                state.has_modern_agent_end = True
+                return out
 
-            out.append(
-                CompletedEvent(
-                    engine=ENGINE,
-                    ok=ok,
-                    answer=answer,
-                    resume=state.resume,
-                    error=error,
-                    usage=state.last_usage,
-                )
-            )
+            if not state.did_emit_completed:
+                out.append(_completion_from_assistant_state(state))
+                state.did_emit_completed = True
+            return out
+
+        case pi_schema.AgentSettled():
+            if state.has_modern_agent_end and not state.did_emit_completed:
+                out.append(_completion_from_assistant_state(state))
+                state.did_emit_completed = True
             return out
 
         case _:

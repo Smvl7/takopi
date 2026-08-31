@@ -29,6 +29,11 @@ class AgentStart(_Event, tag="agent_start"):
 
 class AgentEnd(_Event, tag="agent_end"):
     messages: list[dict[str, Any]]
+    willRetry: bool | None = None
+
+
+class AgentSettled(_Event, tag="agent_settled"):
+    pass
 
 
 class MessageEnd(_Event, tag="message_end"):
@@ -101,6 +106,7 @@ type PiEvent = (
     | SessionInfoChanged
     | AgentStart
     | AgentEnd
+    | AgentSettled
     | MessageStart
     | MessageUpdate
     | MessageEnd

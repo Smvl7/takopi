@@ -37,3 +37,22 @@ def _decode_fixture(name: str) -> list[str]:
 def test_pi_schema_parses_fixture(fixture: str) -> None:
     errors = _decode_fixture(fixture)
     assert not errors, f"{fixture} had {len(errors)} errors: " + "; ".join(errors[:5])
+
+
+def test_pi_schema_decodes_agent_end_retry_metadata() -> None:
+    retrying = pi_schema.decode_event(
+        b'{"type":"agent_end","messages":[],"willRetry":true}'
+    )
+    legacy = pi_schema.decode_event(b'{"type":"agent_end","messages":[]}')
+
+    assert isinstance(retrying, pi_schema.AgentEnd)
+    assert retrying.willRetry is True
+    assert isinstance(legacy, pi_schema.AgentEnd)
+    assert legacy.willRetry is None
+
+
+def test_pi_schema_decodes_agent_settled() -> None:
+    assert isinstance(
+        pi_schema.decode_event(b'{"type":"agent_settled"}'),
+        pi_schema.AgentSettled,
+    )
